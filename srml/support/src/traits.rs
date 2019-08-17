@@ -21,7 +21,7 @@
 use crate::rstd::{prelude::*, result, marker::PhantomData, ops::Div};
 use crate::codec::{Codec, Encode, Decode};
 use primitives::u32_trait::Value as U32;
-use crate::sr_primitives::traits::{MaybeSerializeDebug, SimpleArithmetic, Saturating};
+use crate::sr_primitives::traits::{MaybeDebug, MaybeSerializeDebug, SimpleArithmetic, Saturating};
 use crate::sr_primitives::ConsensusEngineId;
 
 /// Anything that can have a `::len()` method.
@@ -113,7 +113,7 @@ pub trait VerifySeal<Header, Author> {
 /// key owner.
 pub trait KeyOwnerProofSystem<Key> {
 	/// The proof of membership itself.
-	type Proof: Codec;
+	type Proof: Clone + Codec + MaybeDebug + PartialEq;
 	/// The full identification of a key owner and the stash account.
 	type IdentificationTuple: Codec;
 
