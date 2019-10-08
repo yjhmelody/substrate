@@ -729,7 +729,7 @@ pub mod big_num {
 	/// Simple wrapper around an infinitely large integer, represented as limbs of [`Single`].
 	#[derive(Clone, Default)]
 	pub struct Number {
-		/// digits (limbs) of this number (sorted as msb -> lsd).
+		/// digits (limbs) of this number stored as little endian order.
 		pub(crate) digits: Vec<Single>,
 	}
 
@@ -761,8 +761,16 @@ pub mod big_num {
 		///
 		/// This panics if index is out of range.
 		pub fn get(&self, index: usize) -> Single {
-			let len = self.digits.len();
-			self.digits[len - 1 - index]
+			self.digits[index]
+		}
+
+		/// A checked getter for limb at `index`. Note that the order is lsb -> msb.
+		///
+		/// #### Panics
+		///
+		/// This panics if index is out of range.
+		pub fn checked_get(&self, index: usize) -> Option<Single> {
+			self.digits.get(index).cloned()
 		}
 
 		/// A naive setter for limb at `index`. Note that the order is lsb -> msb.
@@ -771,8 +779,7 @@ pub mod big_num {
 		///
 		/// This panics if index is out of range.
 		pub fn set(&mut self, index: usize, value: Single) {
-			let len = self.digits.len();
-			self.digits[len - 1 - index] = value;
+			self.digits[index] = value;
 		}
 
 		/// returns the least significant limb of the number.
@@ -781,7 +788,7 @@ pub mod big_num {
 		///
 		/// While the constructor of the type prevents this, this can panic if `self` has no digits.
 		pub fn lsb(&self) -> Single {
-			self.digits[self.len() - 1]
+			self.digits[0]
 		}
 
 		/// returns the most significant limb of the number.
@@ -790,42 +797,41 @@ pub mod big_num {
 		///
 		/// While the constructor of the type prevents this, this can panic if `self` has no digits.
 		pub fn msb(&self) -> Single {
-			self.digits[0]
+			self.digits[self.len() - 1]
 		}
 
-		/// Strips zeros from the left side of `self`, if any.
-		pub fn lstrip(&mut self) {
+		/// Strips zeros from the msb side of `self`, if any.
+		pub fn strip(&mut self) {
 			// by definition, a big-int number should never have leading zero limbs. This function
 			// has the ability to cause this. There is nothing to do if the number already has 1
 			// limb only. call it a day and return.
 			if self.len().is_zero() { return; }
-			let mut index = 0;
-			for elem in self.digits.iter() {
-				if *elem != 0 { break } else { index += 1 }
+			let mut index = self.len();
+			for elem in self.digits.iter().rev() {
+				if *elem != 0 { break } else { index -= 1 }
 			}
-			if index > 0 {
-				self.digits = self.digits[index..].to_vec()
+			if index < self.len() {
+				self.digits = self.digits[..index].to_vec()
 			}
 		}
 
-		/// Zero-pad `self` from left to reach `size` limbs. Will not make any difference if `self`
+		/// Zero-pad `self` to reach `size` limbs. Will not make any difference if `self`
 		/// is already bigger than `size` limbs.
-		pub fn lpad(&mut self, size: usize) {
+		pub fn pad(&mut self, size: usize) {
 			let n = self.len();
 			if n >= size { return; }
 			let pad = size - n;
-			let mut new_digits = (0..pad).map(|_| 0).collect::<Vec<Single>>();
-			new_digits.extend(self.digits.iter());
-			self.digits = new_digits;
+			let new_digits = (0..pad).map(|_| 0).collect::<Vec<Single>>();
+			self.digits.extend(new_digits);
 		}
 
 		/// Extends either one of `self` or `other` to meet the size of the other one. Equivalent of
-		/// using `lpad()` of the smaller one with the size of the bigger one.
+		/// using `pad()` of the smaller one with the size of the bigger one.
 		pub fn resize(&mut self, other: &mut Self) {
 			if self.len() >= other.len() {
-				other.lpad(self.len())
+				other.pad(self.len())
 			} else if other.len() > self.len() {
-				self.lpad(other.len())
+				self.pad(other.len())
 			}
 		}
 
@@ -996,8 +1002,8 @@ pub mod big_num {
 			let mut other_norm = other.mul(Self::from(normalizer));
 
 			// defensive only; the mul implementation should always create this.
-			self_norm.lpad(n + m + 1);
-			other_norm.lstrip();
+			self_norm.pad(n + m + 1);
+			other_norm.strip();
 
 			// step D2.
 			for j in (0..=m).rev() {
@@ -1046,7 +1052,7 @@ pub mod big_num {
 				// we don't need rhat anymore. just let it go out of scope when it does.
 
 				// step D4
-				let lhs = Self { digits: (j..=j+n).rev().map(|d| self_norm.get(d)).collect() };
+				let lhs = Self { digits: (j..=j+n).map(|d| self_norm.get(d)).collect() };
 				let rhs = other_norm.clone().mul(Self::from(qhat));
 
 				let maybe_sub = lhs.sub(rhs);
@@ -1065,7 +1071,7 @@ pub mod big_num {
 				// step D6: add back if negative happened.
 				if negative {
 					q.set(j, q.get(j) - 1);
-					let u = Self { digits: (j..=j+n).rev().map(|d| self_norm.get(d)).collect() };
+					let u = Self { digits: (j..=j+n).map(|d| self_norm.get(d)).collect() };
 					let r = other_norm.clone().add(u);
 					(j..=j+n).rev().for_each(|d| { self_norm.set(d, r.get(d - j)); })
 				}
@@ -1106,12 +1112,7 @@ pub mod big_num {
 
 	impl PartialEq for Number {
 		fn eq(&self, other: &Self) -> bool {
-			// sadly, we have to reallocate here as strip mutably uses self.
-			let mut lhs = self.clone();
-			let mut rhs = other.clone();
-			lhs.lstrip();
-			rhs.lstrip();
-			lhs.digits.eq(&rhs.digits)
+			Self::cmp(self, other) == Ordering::Equal
 		}
 	}
 
@@ -1119,8 +1120,9 @@ pub mod big_num {
 
 	impl Ord for Number {
 		fn cmp(&self, other: &Self) -> Ordering {
-			let lhs_first = self.digits.iter().position(|&e| e != 0);
-			let rhs_first = other.digits.iter().position(|&e| e != 0);
+			// start from the least significant bit.
+			let lhs_first = self.digits.iter().rposition(|&e| e != 0);
+			let rhs_first = other.digits.iter().rposition(|&e| e != 0);
 
 			match (lhs_first, rhs_first) {
 				// edge cases that should not happen. This basically means that one or both were
@@ -1129,22 +1131,11 @@ pub mod big_num {
 				(Some(_), None) => Ordering::Greater,
 				(None, Some(_)) => Ordering::Less,
 				(Some(lhs_idx), Some(rhs_idx)) => {
-					let lhs = &self.digits[lhs_idx..];
-					let rhs = &other.digits[rhs_idx..];
+					let lhs = &self.digits[..lhs_idx];
+					let rhs = &other.digits[..rhs_idx];
 					let len_cmp = lhs.len().cmp(&rhs.len());
 					match len_cmp {
-						Ordering::Equal => {
-							let mut r = Ordering::Equal;
-							for (i, p) in lhs.iter().enumerate() {
-								let q = rhs[i];
-								match p.cmp(&q) {
-									Ordering::Less => { r = Ordering::Less; break} ,
-									Ordering::Greater => { r = Ordering::Greater; break} ,
-									_ => continue,
-								}
-							}
-							r
-						}
+						Ordering::Equal => lhs.cmp(rhs),
 						_ => len_cmp,
 					}
 				}
@@ -1195,13 +1186,13 @@ pub mod big_num {
 				impl TryFrom<Number> for $type {
 					type Error = &'static str;
 					fn try_from(mut value: Number) -> Result<$type, Self::Error> {
-						value.lstrip();
+						value.strip();
 						let error_message = concat!("cannot fit a number into ", stringify!($type));
 						if value.len() * SHIFT > $len {
 							Err(error_message)
 						} else {
 							let mut acc: $type = Zero::zero();
-							for (i, d) in value.digits.iter().rev().cloned().enumerate() {
+							for (i, d) in value.digits.iter().cloned().enumerate() {
 								let d: $type = d.into();
 								acc += d << (SHIFT * i);
 							}
@@ -1229,7 +1220,7 @@ pub mod big_num {
 	impl From<Double> for Number {
 		fn from(a: Double) -> Self {
 			let (ah, al) = split(a);
-			Self { digits: vec![ah, al] }
+			Self { digits: vec![al, ah] }
 		}
 	}
 
@@ -1237,7 +1228,6 @@ pub mod big_num {
 	pub mod tests_big_num {
 		use super::*;
 		use rand::Rng;
-		use rstd::convert::TryInto;
 		#[cfg(feature = "bench")]
 		use test::Bencher;
 
@@ -1287,44 +1277,48 @@ pub mod big_num {
 		#[test]
 		fn strip_works() {
 			let mut a = Number::from_limbs(&[0, 1, 0]);
-			a.lstrip();
-			assert_eq!(a, Number { digits: vec![1, 0] });
+			a.strip();
+			assert_eq!(a, Number { digits: vec![0, 1] });
 
 			let mut a = Number::from_limbs(&[0, 0, 1]);
-			a.lstrip();
-			assert_eq!(a, Number { digits: vec![1] });
+			a.strip();
+			assert_eq!(a, Number { digits: vec![0, 0, 1] });
 
 			let mut a = Number::from_limbs(&[0, 0]);
-			a.lstrip();
+			a.strip();
 			assert_eq!(a, Number { digits: vec![0] });
 
 			let mut a = Number::from_limbs(&[0, 0, 0]);
-			a.lstrip();
+			a.strip();
 			assert_eq!(a, Number { digits: vec![0] });
+
+			let mut a = Number::from_limbs(&[1, 0, 0]);
+			a.strip();
+			assert_eq!(a, Number { digits: vec![1] });
 		}
 
 		#[test]
 		fn resize_works() {
 			let mut a = Number::from_limbs(&[0, 1, 0]);
-			let mut b = Number::from_limbs(&[0, 1]);
+			let mut b = Number::from_limbs(&[1, 1]);
 			a.resize(&mut b);
 			assert_eq!(a.digits, vec![0, 1, 0]);
-			assert_eq!(b.digits, vec![0, 0, 1]);
+			assert_eq!(b.digits, vec![1, 1, 0]);
 		}
 
 		#[test]
-		fn lpad_works() {
+		fn pad_works() {
 			let mut a = Number::from_limbs(&[0, 1, 0]);
-			a.lpad(2);
+			a.pad(2);
 			assert_eq!(a.digits, vec![0, 1, 0]);
 
 			let mut a = Number::from_limbs(&[0, 1, 0]);
-			a.lpad(3);
+			a.pad(3);
 			assert_eq!(a.digits, vec![0, 1, 0]);
 
 			let mut a = Number::from_limbs(&[0, 1, 0]);
-			a.lpad(4);
-			assert_eq!(a.digits, vec![0, 0, 1, 0]);
+			a.pad(4);
+			assert_eq!(a.digits, vec![0, 1, 0, 0]);
 		}
 
 		#[test]
@@ -1338,7 +1332,7 @@ pub mod big_num {
 				false,
 			);
 			assert_eq!(
-				Number { digits: vec![0, 1, 2, 3] } == Number { digits: vec![1, 2, 3] },
+				Number { digits: vec![1, 2, 3, 0] } == Number { digits: vec![1, 2, 3] },
 				true,
 			);
 		}
@@ -1352,13 +1346,13 @@ pub mod big_num {
 			assert!(Number { digits: vec![] } < Number { digits: vec![1] });
 
 			assert!(Number { digits: vec![1, 2, 3] } == Number { digits: vec![1, 2, 3] });
-			assert!(Number { digits: vec![0, 1, 2, 3] } == Number { digits: vec![1, 2, 3] });
+			assert!(Number { digits: vec![1, 2, 3, 0] } == Number { digits: vec![1, 2, 3] });
 
-			assert!(Number { digits: vec![1, 2, 4] } > Number { digits: vec![1, 2, 3] });
-			assert!(Number { digits: vec![0, 1, 2, 4] } > Number { digits: vec![1, 2, 3] });
-			assert!(Number { digits: vec![1, 2, 1, 0] } > Number { digits: vec![1, 2, 3] });
+			assert!(Number { digits: vec![4, 2, 1] } > Number { digits: vec![3, 2, 1] });
+			assert!(Number { digits: vec![4, 2, 1, 0] } > Number { digits: vec![3, 2, 1] });
+			assert!(Number { digits: vec![0, 1, 2, 1] } > Number { digits: vec![3, 2, 1] });
 
-			assert!(Number { digits: vec![0, 1, 2, 1] } < Number { digits: vec![1, 2, 3] });
+			assert!(Number { digits: vec![1, 2, 1, 0] } < Number { digits: vec![3, 2, 1] });
 		}
 
 		#[test]
@@ -1471,7 +1465,7 @@ pub mod big_num {
 			let n = a.mul(b);
 
 			assert_eq!(n.len(), 2);
-			assert_eq!(n.digits, vec![0, 40]);
+			assert_eq!(n.digits, vec![40, 0]);
 		}
 
 		#[test]
@@ -1479,12 +1473,16 @@ pub mod big_num {
 			let a = Number { digits: vec![2] };
 			let b = Number { digits: vec![1, 2] };
 			let c = Number { digits: vec![1, 1, 2] };
-			let d = Number { digits: vec![0, 2] };
-			let e = Number { digits: vec![0, 1, 1, 2] };
+			let d = Number { digits: vec![2, 0] };
+			let e = Number { digits: vec![2, 1, 1, 0] };
 
+			// because a is smaller
 			assert!(a.clone().div(b.clone(), true).is_none());
+			// because a cannot be single limb
 			assert!(c.clone().div(a.clone(), true).is_none());
+			// because d cannot have msb 0
 			assert!(c.clone().div(d.clone(), true).is_none());
+			// because e cannot have msb 0
 			assert!(e.clone().div(a.clone(), true).is_none());
 
 			assert!(c.clone().div(b.clone(), true).is_some());
@@ -1493,7 +1491,7 @@ pub mod big_num {
 		#[test]
 		fn div_unit_works() {
 			let a = Number { digits: vec![100] };
-			let b = Number { digits: vec![1, 100] };
+			let b = Number { digits: vec![100, 1] };
 
 			assert_eq!(a.clone().div_unit(1), a);
 			assert_eq!(a.clone().div_unit(0), a);
@@ -1645,7 +1643,7 @@ pub mod helpers_128bit {
 		let (xhh, xhl) = big_num::split(xh);
 		let (xlh, xll) = big_num::split(xl);
 		let mut n = big_num::Number::from_limbs(&[xhh, xhl, xlh, xll]);
-		n.lstrip();
+		n.strip();
 		n
 	}
 
@@ -1675,7 +1673,7 @@ pub mod helpers_128bit {
 			let c_num = to_big_num(c);
 
 			let mut ab = a_num * b_num;
-			ab.lstrip();
+			ab.strip();
 			let mut q = if c_num.len() == 1 {
 				// PROOF: if `c_num.len() == 1` then `c` fits in one limb.
 				ab.div_unit(c as big_num::Single)
@@ -1690,7 +1688,7 @@ pub mod helpers_128bit {
 				if r > (c / 2) { q = q.add(to_big_num(1)); }
 				q
 			};
-			q.lstrip();
+			q.strip();
 			q.try_into().map_err(|_| "result cannot fit in u128")
 		}
 	}
