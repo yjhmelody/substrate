@@ -51,7 +51,10 @@ use sr_primitives::generic::BlockId;
 use sr_primitives::traits::NumberFor;
 
 pub use self::error::Error;
-pub use self::builder::{ServiceBuilder, ServiceBuilderExport, ServiceBuilderImport, ServiceBuilderRevert};
+pub use self::builder::{
+	ServiceBuilder, ServiceBuilderExport, ServiceBuilderImport, ServiceBuilderRevert,
+	TransactionPoolMaintainer,
+};
 pub use config::{Configuration, Roles, PruningMode};
 pub use chain_spec::{ChainSpec, Properties, RuntimeGenesis, Extension as ChainSpecExtension};
 pub use transaction_pool::txpool::{
@@ -133,7 +136,6 @@ macro_rules! new_impl {
 		$block:ty,
 		$config:ident,
 		$build_components:expr,
-		$maintain_transaction_pool:expr,
 		$offchain_workers:expr,
 		$start_rpc:expr,
 	) => {{
@@ -147,6 +149,7 @@ macro_rules! new_impl {
 		let (
 			client,
 			on_demand,
+			_remote_blockchain,
 			backend,
 			keystore,
 			select_chain,
@@ -155,6 +158,7 @@ macro_rules! new_impl {
 			finality_proof_provider,
 			network_protocol,
 			transaction_pool,
+			transaction_pool_maintainer,
 			rpc_extensions,
 			dht_event_tx,
 		) = $build_components(&$config)?;
@@ -240,10 +244,10 @@ macro_rules! new_impl {
 					let txpool = txpool.upgrade();
 
 					if let (Some(txpool), Some(client)) = (txpool.as_ref(), wclient.upgrade()) {
-						let future = $maintain_transaction_pool(
+						let future = transaction_pool_maintainer.maintain(
 							&BlockId::hash(notification.hash),
 							&client,
-							&*txpool,
+							&txpool,
 							&notification.retracted,
 						).map_err(|e| warn!("Pool error processing new block: {:?}", e))?;
 						let _ = to_spawn_tx_.unbounded_send(future);
