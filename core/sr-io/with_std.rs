@@ -28,6 +28,74 @@ use trie::{TrieConfiguration, trie_types::Layout};
 use std::{collections::HashMap, convert::TryFrom};
 
 use externalities::{with_externalities, set_and_run_with_externalities, ExternalitiesExt};
+use sandbox::{EnvironmentDefinitionBuilder, Error, HostError, Instance, ReturnValue, TypedValue};
+
+// environmental!(ext: trait Externalities<Blake2Hasher>);
+
+fn execute_wasm(code: &[u8], args: &[TypedValue]) -> Result<ReturnValue, HostError> {
+	struct State {
+		counter: u32,
+	}
+	fn check_read_proof(_e: &mut State, _args: &[TypedValue]) -> Result<ReturnValue, HostError> {
+		// TODO: Add true verification here
+		Ok(ReturnValue::Value(TypedValue::I32(1)))
+	}
+
+	let mut env_builder = EnvironmentDefinitionBuilder::new();
+
+	let mut state = State {counter: 0};
+
+	env_builder.add_host_func("env", "ext_check_read_proof", check_read_proof);
+
+	let memory = match sandbox::Memory::new(100, Some(100)) {
+		Ok(m) => m,
+		Err(_) => unreachable!("
+				Memory::new() can return Err only if parameters are borked; \
+				We passing params here explicitly and they're correct; \
+				Memory::new() can't return a Error qed"
+		),
+	};
+
+	env_builder.add_memory("env", "memory", memory);
+	let mut instance = Instance::new(code, &env_builder, &mut state)?;
+	let result = instance.invoke(b"check_read_proof", args, &mut state);
+
+	result.map_err(|err| {
+		HostError
+	})
+}
+
+#[test]
+fn invoke_proof() {
+	let code = wabt::wat2wasm(r#"
+(module
+  (type $t0 (func (result i32)))
+  (import "env" "memory" (memory $env.memory 17))
+  (import "env" "ext_check_read_proof" (func $ext_check_read_proof (type $t0)))
+  (func $check_read_proof (type $t0) (result i32)
+    (local $l0 i32)
+    call $ext_check_read_proof
+    set_local $l0
+    get_local $l0
+    return)
+  (table $__indirect_function_table 1 1 anyfunc)
+  (global $__data_end i32 (i32.const 1048610))
+  (global $__heap_base i32 (i32.const 1048610))
+  (global $__rustc_debug_gdb_scripts_section__ i32 (i32.const 1048576))
+  (export "__indirect_function_table" (table 0))
+  (export "__data_end" (global 0))
+  (export "__heap_base" (global 1))
+  (export "__rustc_debug_gdb_scripts_section__" (global 2))
+  (export "check_read_proof" (func $check_read_proof))
+)		"#).unwrap();
+
+	let result = execute_wasm(
+		&code,
+		&[],
+	);
+	assert_eq!(result.unwrap(), ReturnValue::Value(TypedValue::I32(1)));
+}
+
 
 /// Additional bounds for `Hasher` trait for with_std.
 pub trait HasherBounds {}
@@ -177,6 +245,16 @@ impl OtherApi for () {
 		with_externalities(|ext|
 			ext.chain_id()
 		).unwrap_or(0)
+	}
+
+	fn run_wasm() {
+		use std::fs;
+
+		// TODO: Read wasm from chain
+		let code = fs::read("/tmp/proof.compact.wasm").expect("Wasm file not found");
+		let args = [];
+		let res = execute_wasm(&code, &args);
+		println!("result: {:?}", res);
 	}
 
 	fn print_num(val: u64) {
