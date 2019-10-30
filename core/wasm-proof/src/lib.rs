@@ -26,7 +26,30 @@
 #![cfg_attr(feature = "std", doc = "Substrate runtime standard library as compiled when linked with Rust's standard library.")]
 #![cfg_attr(not(feature = "std"), doc = "Substrate's runtime standard library as compiled without Rust's standard library.")]
 
+use sr_primitives::traits::{Block as BlockT, Header as HeaderT, BlakeTwo256};
+use sr_primitives::generic;
 use rstd::vec::Vec;
+
+use sr_primitives::OpaqueExtrinsic as UncheckedExtrinsic;
+
+pub type Hash = primitives::H256;
+pub type BlockNumber = u32;
+pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
+pub type Block = generic::Block<Header, UncheckedExtrinsic>;
+
+/// Remote storage read request.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RemoteReadRequest<Header: HeaderT> {
+	/// Read at state of given block.
+	pub block: Header::Hash,
+	/// Header of block at which read is performed.
+	pub header: Header,
+	/// Storage key to read.
+	pub keys: Vec<Vec<u8>>,
+	/// Number of times to retry request. None means that default RETRY_COUNT is used.
+	pub retry_count: Option<usize>,
+}
+
 
 /// Converts a public trait definition into a private trait and set of public functions
 /// that assume the trait is implemented for `()` for ease of calling.
@@ -66,7 +89,7 @@ macro_rules! export_api {
 
 export_api! {
 	pub(crate) trait OtherApi {
-		fn run_wasm();
+		fn run_wasm(request: &RemoteReadRequest<Header>, remote_proof: Vec<Vec<u8>>);
 	}
 }
 

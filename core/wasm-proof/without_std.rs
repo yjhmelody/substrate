@@ -139,7 +139,8 @@ pub mod ext {
 pub use self::ext::*;
 
 impl OtherApi for () {
-	fn run_wasm() {
+	fn run_wasm(request: &RemoteReadRequest<Header>, remote_proof: Vec<Vec<u8>>) {
+		// TODO: FIXME
 		unsafe {
 			ext_run_wasm.get()();
 		}

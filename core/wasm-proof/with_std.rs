@@ -15,30 +15,20 @@
 // along with Substrate.  If not, see <http://www.gnu.org/licenses/>.
 use hash_db::Hasher;
 use primitives::H256;
-use sr_primitives::traits::{Block as BlockT, Header as HeaderT};
+use sr_primitives::traits::{Block as BlockT, Header as HeaderT, BlakeTwo256};
+use sr_primitives::generic;
 use substrate_state_machine::read_proof_check;
+use primitives::Blake2Hasher;
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use core::mem::transmute;
 
-use sandbox::{EnvironmentDefinitionBuilder, Error, HostError, Instance, ReturnValue, TypedValue};
+use sandbox::{EnvironmentDefinitionBuilder, HostError, Instance, ReturnValue, TypedValue};
 
 #[derive(Debug)]
 pub enum ProofError {
 	Proof,
-}
-
-/// Remote storage read request.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct RemoteReadRequest<Header: HeaderT> {
-	/// Read at state of given block.
-	pub block: Header::Hash,
-	/// Header of block at which read is performed.
-	pub header: Header,
-	/// Storage key to read.
-	pub keys: Vec<Vec<u8>>,
-	/// Number of times to retry request. None means that default RETRY_COUNT is used.
-	pub retry_count: Option<usize>,
 }
 
 /// Hash conversion. Used to convert between unbound associated hash types in traits,
@@ -51,7 +41,7 @@ fn convert_hash<H1: Default + AsMut<[u8]>, H2: AsRef<[u8]>>(src: &H2) -> H1 {
 	dest
 }
 
-pub fn check_read_proof<Block: BlockT, H: Hasher<Out = H256>>(
+pub fn check_read_proof_<Block: BlockT, H: Hasher<Out = H256>>(
 	request: &RemoteReadRequest<Block::Header>,
 	remote_proof: Vec<Vec<u8>>,
 ) -> Result<HashMap<Vec<u8>, Option<Vec<u8>>>, ProofError> {
@@ -69,10 +59,29 @@ fn execute_wasm(code: &[u8], args: &[TypedValue]) -> Result<ReturnValue, HostErr
 	struct State {
 		counter: u32,
 	}
-	fn check_read_proof(_e: &mut State, _args: &[TypedValue]) -> Result<ReturnValue, HostError> {
+	fn check_read_proof(_e: &mut State, args: &[TypedValue]) -> Result<ReturnValue, HostError> {
 		// TODO: Add true verification here
+		if args.len() != 2 {
+			return Err(HostError);
+		}
+		let arg1 = match args[0] {
+			TypedValue::I64(p) => unsafe {std::mem::transmute::<i64, &RemoteReadRequest<Header>>(p) } ,
+			_ => unreachable!(),
+		};
 
-		Ok(ReturnValue::Value(TypedValue::I32(1)))
+		use std::vec::Vec;
+		let arg2 = match args[1] {
+			TypedValue::I64(p) => unsafe {std::mem::transmute::<i64, &Vec<Vec<u8>>>(p) },
+			_ => unreachable!(),
+		};
+
+		let res = if check_read_proof_::<Block, Blake2Hasher>(arg1, arg2.clone()).is_err() {
+			0
+		} else {
+			1
+		};
+
+		Ok(ReturnValue::Value(TypedValue::I32(res)))
 	}
 
 	let mut env_builder = EnvironmentDefinitionBuilder::new();
@@ -100,6 +109,22 @@ fn execute_wasm(code: &[u8], args: &[TypedValue]) -> Result<ReturnValue, HostErr
 	})
 }
 
+impl OtherApi for () {
+	fn run_wasm(request: &RemoteReadRequest<Header>, remote_proof: Vec<Vec<u8>>) {
+		use std::fs;
+		// TODO: Read wasm from chain
+		let code = fs::read("/tmp/proof.compact.wasm").expect("Wasm file not found");
+
+		let arg1 = request as *const RemoteReadRequest<Header>;
+		let arg2 = remote_proof.as_ptr();
+		let args = [TypedValue::I64(arg1 as i64), TypedValue::I64(arg2 as i64)];
+		let res = execute_wasm(&code, &args);
+		println!("result: {:?}", res);
+	}
+}
+
+
+// FIXME
 #[test]
 fn invoke_proof() {
 	let code = wabt::wat2wasm(r#"
@@ -129,15 +154,4 @@ fn invoke_proof() {
 		&[],
 	);
 	assert_eq!(result.unwrap(), ReturnValue::Value(TypedValue::I32(1)));
-}
-
-impl OtherApi for () {
-	fn run_wasm() {
-		use std::fs;
-		// TODO: Read wasm from chain
-		let code = fs::read("/tmp/proof.compact.wasm").expect("Wasm file not found");
-		let args = [];
-		let res = execute_wasm(&code, &args);
-		println!("result: {:?}", res);
-	}
 }
