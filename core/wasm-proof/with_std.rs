@@ -59,8 +59,8 @@ fn execute_wasm(code: &[u8], args: &[TypedValue]) -> Result<ReturnValue, HostErr
 	struct State {
 		counter: u32,
 	}
+
 	fn check_read_proof(_e: &mut State, args: &[TypedValue]) -> Result<ReturnValue, HostError> {
-		// TODO: Add true verification here
 		if args.len() != 2 {
 			return Err(HostError);
 		}
@@ -83,6 +83,7 @@ fn execute_wasm(code: &[u8], args: &[TypedValue]) -> Result<ReturnValue, HostErr
 
 		Ok(ReturnValue::Value(TypedValue::I32(res)))
 	}
+
 
 	let mut env_builder = EnvironmentDefinitionBuilder::new();
 
@@ -111,10 +112,6 @@ fn execute_wasm(code: &[u8], args: &[TypedValue]) -> Result<ReturnValue, HostErr
 
 impl OtherApi for () {
 	fn run_wasm(request: &RemoteReadRequest<Header>, remote_proof: Vec<Vec<u8>>) {
-		use std::fs;
-		// TODO: Read wasm from chain
-		let code = fs::read("/tmp/proof.compact.wasm").expect("Wasm file not found");
-
 		let arg1 = request as *const RemoteReadRequest<Header>;
 		let arg2 = remote_proof.as_ptr();
 		let args = [TypedValue::I64(arg1 as i64), TypedValue::I64(arg2 as i64)];

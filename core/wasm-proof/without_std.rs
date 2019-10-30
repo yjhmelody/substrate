@@ -140,7 +140,7 @@ pub use self::ext::*;
 
 impl OtherApi for () {
 	fn run_wasm(request: &RemoteReadRequest<Header>, remote_proof: Vec<Vec<u8>>) {
-		// TODO: FIXME
+		// FIXME: ext_run_wasm not impled
 		unsafe {
 			ext_run_wasm.get()();
 		}
