@@ -1,5 +1,5 @@
-use support::dispatch::Result;
 use rstd::prelude::*;
+use support::dispatch::Result;
 
 fn default_identifier_validator(id: &Vec<u8>, min: usize, max: usize) -> Result {
     // valid id must be between 10 and 20 characters

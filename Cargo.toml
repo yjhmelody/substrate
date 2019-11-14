@@ -71,7 +71,7 @@ members = [
 	"srml/assets",
 	"srml/aura",
 	"srml/balances",
-`	"srml/ics",
+	"srml/ics",
 	"srml/contracts",
 	"srml/contracts/rpc",
 	"srml/collective",
