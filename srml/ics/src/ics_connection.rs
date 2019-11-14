@@ -23,8 +23,7 @@ decl_event!(
     }
 );
 
-#[derive(Clone, PartialEq, Eq, Encode, Decode)]
-#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Clone, PartialEq, Eq, Encode, Decode, Debug)]
 pub enum ConnectionState {
     None = 0,
     Init = 1,
@@ -33,11 +32,12 @@ pub enum ConnectionState {
 }
 
 pub type ConnectionId = Vec<u8>;
+
 pub type ClientId = Vec<u8>;
+
 pub type ConnectionPath = Vec<u8>;
 
-#[derive(Clone, PartialEq, Eq, Encode, Decode)]
-#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Clone, PartialEq, Eq, Encode, Decode, Debug)]
 pub struct ConnectionEnd {
     state: ConnectionState,
     client_id: ClientId,
@@ -65,8 +65,7 @@ impl ConnectionEnd {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Encode, Decode)]
-#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Clone, PartialEq, Eq, Encode, Decode, Debug)]
 pub struct Counterparty {
     client_id: ClientId,
     connection_id: ConnectionId,
@@ -106,8 +105,7 @@ fn client_connections_path(client_id: ClientId) -> Vec<u8> {
     path
 }
 
-#[derive(Clone, Encode, Decode)]
-#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Clone, PartialEq, Eq, Encode, Decode, Debug)]
 pub struct ConnectionOpenInit<T: Trait> {
     connection_id: ConnectionId,
     client_id: ClientId,
@@ -145,8 +143,7 @@ impl<T: Trait> ConnectionOpenInit<T> {
     }
 }
 
-#[derive(Clone, Encode, Decode)]
-#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Clone, PartialEq, Eq, Encode, Decode, Debug)]
 pub struct ConnectionOpenTry<T: Trait> {
     connection_id: ConnectionId,
     client_id: ClientId,
@@ -238,7 +235,7 @@ impl<T: Trait> Module<T> {
         let mut new_conns = vec![];
 
         for conn in conns {
-            if conn != path {
+            if conn != connection_id {
                 new_conns.push(conn);
             }
         }
@@ -268,6 +265,7 @@ decl_module! {
         //
         // NOTE: Identifiers are checked on msg validation.
         pub fn conn_open_init(origin, connection_id: ConnectionId, client_id: ClientId, counterparty: Counterparty) -> Result {
+			ensure_signed(origin)?;
             if Self::connection_ends(connection_id.clone()).is_some() {
                 return Err("cannot initialize connection");
             }
@@ -285,7 +283,7 @@ decl_module! {
         // NOTE:
         //  - Here chain A acts as the counterparty
         //  - Identifiers are checked on msg validation
-        pub fn conn_open_try(origin) -> Result {
+        pub fn conn_open_try(_origin) -> Result {
             unimplemented!();
         }
 
@@ -293,7 +291,7 @@ decl_module! {
         // to chain A (this code is executed on chain A).
         //
         // NOTE: Identifiers are checked on msg validation.
-        pub fn conn_open_ack(origin) -> Result {
+        pub fn conn_open_ack(_origin) -> Result {
             unimplemented!();
         }
 
@@ -301,7 +299,7 @@ decl_module! {
         // which the connection is open on both chains (this code is executed on chain B).
         //
         // NOTE: Identifiers are checked on msg validation.
-        pub fn conn_open_confirm(origin) -> Result {
+        pub fn conn_open_confirm(_origin) -> Result {
             unimplemented!();
         }
     }
