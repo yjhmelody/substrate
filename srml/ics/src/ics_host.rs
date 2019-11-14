@@ -21,7 +21,6 @@ fn default_identifier_validator(id: &Vec<u8>, min: usize, max: usize) -> Result 
 }
 
 fn is_ascii_lowercase(id: &Vec<u8>) -> bool {
-    id.iter().all()
     for ch in id {
         if !ch.is_ascii_lowercase() {
             return false;
