@@ -117,16 +117,9 @@ impl<T: Trait> ConnectionOpenInit<T> {
     pub fn new(
         connection_id: ConnectionId,
         client_id: ClientId,
-        counterparty_connection_id: ConnectionId,
-        counterparty_client_id: ClientId,
-        counterparty_prefix: Vec<u8>,
+        counterparty: Counterparty,
         signer: Option<T::AccountId>,
     ) -> Self {
-        let counterparty = Counterparty::new(
-            counterparty_client_id,
-            counterparty_connection_id,
-            counterparty_prefix,
-        );
         Self {
             connection_id,
             client_id,
@@ -149,8 +142,8 @@ pub struct ConnectionOpenTry<T: Trait> {
     client_id: ClientId,
     counterparty: Counterparty,
     counterparty_versions: Vec<Vec<u8>>,
-    proof_init: Vec<u8>,
-    proof_consensus: Vec<u8>,
+    proof_init: Option<Vec<u8>>,
+    proof_consensus: Option<Vec<u8>>,
     proof_height: T::BlockNumber,
     consensus_height: T::BlockNumber,
     signer: Option<T::AccountId>,
@@ -160,30 +153,23 @@ impl<T: Trait> ConnectionOpenTry<T> {
     pub fn new(
         connection_id: ConnectionId,
         client_id: ClientId,
-        counterparty_connection_id: ConnectionId,
-        counterparty_client_id: ClientId,
-        counterparty_prefix: Vec<u8>,
+        counterparty: Counterparty,
         counterparty_versions: Vec<Vec<u8>>,
-        proof_init: Vec<u8>,
-        proof_consensus: Vec<u8>,
+        proof_init: Option<Vec<u8>>,
+        proof_consensus: Option<Vec<u8>>,
         proof_height: T::BlockNumber,
         consensus_height: T::BlockNumber,
         signer: Option<T::AccountId>,
     ) -> Self {
-        let counterparty = Counterparty::new(
-            counterparty_client_id,
-            counterparty_connection_id,
-            counterparty_prefix,
-        );
         Self {
             connection_id,
             client_id,
             counterparty,
-			counterparty_versions,
-			proof_init,
-			proof_consensus,
-			proof_height,
-			consensus_height,
+            counterparty_versions,
+            proof_init,
+            proof_consensus,
+            proof_height,
+            consensus_height,
             signer,
         }
     }
@@ -191,7 +177,22 @@ impl<T: Trait> ConnectionOpenTry<T> {
     pub fn validate_basic(&self) -> Result {
         default_connection_identifier_validator(&self.connection_id)?;
         default_client_identifier_validator(&self.client_id)?;
-        self.signer.as_ref().ok_or("missing signer address")?;
+        // todo: more version check
+        if self.counterparty_versions.is_empty() {
+            return Err("missing counterparty versions");
+        }
+
+        self.proof_init.as_ref().ok_or("proof init cannot be nil")?;
+        self.proof_consensus
+            .as_ref()
+            .ok_or("proof consensus cannot be nil")?;
+        if self.proof_height == 0.into() {
+            return Err("proof height must be > 0");
+        }
+        if self.consensus_height == 0.into() {
+            return Err("consensus height must be > 0");
+        }
+        self.signer.as_ref().ok_or("missing signer address");
         self.counterparty.validate_basic()
     }
 }
@@ -265,14 +266,17 @@ decl_module! {
         //
         // NOTE: Identifiers are checked on msg validation.
         pub fn conn_open_init(origin, connection_id: ConnectionId, client_id: ClientId, counterparty: Counterparty) -> Result {
-			ensure_signed(origin)?;
+            let who = ensure_signed(origin)?;
             if Self::connection_ends(connection_id.clone()).is_some() {
                 return Err("cannot initialize connection");
             }
-            let connection = ConnectionEnd::new(ConnectionState::Init, client_id.clone(), counterparty, get_compatible_versions());
+            let connection = ConnectionEnd::new(ConnectionState::Init, client_id.clone(), counterparty.clone(), get_compatible_versions());
 
-            Self::add_connection_to_client(client_id, connection_id.clone())?;
-            <ConnectionEnds>::insert(connection_id, connection);
+            Self::add_connection_to_client(client_id.clone(), connection_id.clone())?;
+            <ConnectionEnds>::insert(connection_id.clone(), connection);
+
+            let connection_open_init = ConnectionOpenInit::new(connection_id, client_id, counterparty, Some(who.clone()));
+            Self::deposit_event(RawEvent::MsgConnectionOpenInit(connection_open_init, who));
 
             Ok(())
         }
